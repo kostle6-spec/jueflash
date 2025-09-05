@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Arcade Flash (SWF) con Ruffle</title>
+  <meta name="description" content="Página simple para cargar y jugar archivos .swf usando el emulador Ruffle." />
+
+  <!-- Ruffle desde CDN (mantiene versión actualizada) -->
+  <script src="https://unpkg.com/@ruffle-rs/ruffle"></script>
+
+  <style>
+    :root {
+      --bg: #0f1115; --card: #161a22; --text: #e8ecf3; --muted: #9aa3b2; --brand: #6ee7b7;
+    }
+    * { box-sizing: border-box }
+    body { margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, 'Helvetica Neue', Arial, Noto Sans, 'Apple Color Emoji', 'Segoe UI Emoji'; background: var(--bg); color: var(--text) }
+    header { padding: 20px; display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; border-bottom: 1px solid #202636 }
+    header h1 { margin: 0; font-size: clamp(20px, 2.5vw, 28px); letter-spacing: 0.2px }
+    header .actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap }
+    .btn { background: #1e2431; color: var(--text); border: 1px solid #2a3244; padding: 10px 14px; border-radius: 12px; cursor: pointer; font-weight: 600 }
+    .btn:hover { background: #242b3b }
+    .btn.primary { background: #1b2a22; border-color: #234238; color: var(--brand) }
+    .btn.ghost { background: transparent; border-color: #2a3244; color: var(--muted) }
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px; padding: 16px }
+    .card { background: var(--card); border: 1px solid #242b36; padding: 12px; border-radius: 16px; display: flex; flex-direction: column; gap: 10px }
+    .card h3 { margin: 0; font-size: 16px }
+    .card p { margin: 0; color: var(--muted); font-size: 13px }
+    .card .row { display: flex; gap: 8px; align-items: center; justify-content: space-between }
+    #stage-wrap { padding: 16px; }
+    #stage { width: 100%; min-height: 360px; display: grid; place-items: center; background: #0c0f14; border-top: 1px solid #202636; border-bottom: 1px solid #202636 }
+    #stage .placeholder { color: var(--muted); text-align: center }
+    #messages { padding: 12px 16px; color: var(--muted); font-size: 13px }
+    .hidden { display: none }
+    .kbd { padding: 1px 6px; border: 1px solid #2a3244; border-bottom-width: 3px; border-radius: 6px; background: #10151f; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; font-size: 12px }
+    footer { padding: 18px 16px; color: var(--muted); font-size: 12px }
+    .tag { display: inline-block; padding: 2px 8px; border-radius: 999px; border: 1px solid #2a3244; color: var(--muted); font-size: 11px }
+    input[type="file"] { display: none }
+    label.file { cursor: pointer }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Arcade Flash · <span class="tag">Ruffle</span></h1>
+    <div class="actions">
+      <label for="localFile" class="btn">Cargar SWF local…</label>
+      <input id="localFile" type="file" accept=".swf" />
+      <button id="fullBtn" class="btn ghost" title="Pantalla completa"><span>⛶</span></button>
+      <button id="clearBtn" class="btn ghost" title="Cerrar juego">✕</button>
+    </div>
+  </header>
+
+  <div id="stage-wrap">
+    <div id="stage">
+      <div class="placeholder">
+        <p><strong>Seleccioná un juego</strong> de la lista o cargá un <code class="kbd">.swf</code> desde tu PC.</p>
+        <p>Controles: teclado y mouse como en el Flash original. Podés probar <span class="kbd">F</span> para pantalla completa.</p>
+      </div>
+    </div>
+    <div id="messages"></div>
+  </div>
+
+  <section>
+    <div class="grid" id="gamesGrid">
+      <!-- EJEMPLOS — reemplazá las rutas por tus juegos en ./games/ -->
+      <!-- Copiá/pegá más entradas dentro del array en <script> abajo -->
+    </div>
+  </section>
+
+  <footer>
+    <p>
+      Sugerencia: serví este sitio desde HTTPS y el mismo dominio que tus <code class="kbd">.swf</code> para evitar problemas de CORS.
+      Si auto-alojás Ruffle, asegurate de servir <code class="kbd">.wasm</code> con <code class="kbd">application/wasm</code>.
+    </p>
+  </footer>
+
+  <script>
+    // --- Catálogo de juegos (editá las rutas/ nombres) ---
+    const GAMES = [
+      { title: "N-Game (demo)", file: "games/n-game.swf", info: "AS2 / 640×480" },
+      { title: "Dino Run (demo)", file: "games/dino-run.swf", info: "AS2 / 800×600" },
+      { title: "Fancy Pants (demo)", file: "games/fancy-pants.swf", info: "AS2" },
+      // Agregá más: { title: "Mi Juego", file: "games/mi-juego.swf", info: "AS2" },
+    ];
+
+    const grid = document.getElementById('gamesGrid');
+    const stage = document.getElementById('stage');
+    const msg = document.getElementById('messages');
+    const fullBtn = document.getElementById('fullBtn');
+    const clearBtn = document.getElementById('clearBtn');
+    const localFile = document.getElementById('localFile');
+
+    // Render de tarjetas
+    function renderCards() {
+      grid.innerHTML = '';
+      GAMES.forEach((g, i) => {
+        const el = document.createElement('div');
+        el.className = 'card';
+        el.innerHTML = `
+          <h3>${g.title}</h3>
+          <p>${g.info ?? ''}</p>
+          <div class="row">
+            <button class="btn primary" data-i="${i}">Jugar</button>
+            <code class="kbd" title="Ruta del SWF">${g.file}</code>
+          </div>`;
+        el.querySelector('button').addEventListener('click', () => loadGame(g.file));
+        grid.appendChild(el);
+      });
+    }
+
+    // Limpiar escenario
+    function clearStage() {
+      stage.innerHTML = '<div class="placeholder"><p>Juego cerrado.</p></div>';
+      msg.textContent = '';
+    }
+
+    // Cargar juego con la API de Ruffle
+    let playerEl = null;
+    async function loadGame(path) {
+      try {
+        stage.innerHTML = '';
+        const ruffle = window.RufflePlayer?.newest?.();
+        if (!ruffle) throw new Error('Ruffle no inicializó. Verificá el <script> del CDN.');
+        playerEl = ruffle.createPlayer();
+        playerEl.style.width = '100%';
+        playerEl.style.maxWidth = '960px';
+        playerEl.style.aspectRatio = '4 / 3';
+        playerEl.style.background = '#000';
+        stage.appendChild(playerEl);
+        await playerEl.load(path);
+        msg.textContent = `Cargado: ${path}`;
+      } catch (e) {
+        console.error(e);
+        msg.textContent = 'Error: ' + e.message;
+        stage.innerHTML = '<div class="placeholder"><p>No se pudo cargar el SWF.</p></div>';
+      }
+    }
+
+    // Local .swf desde disco
+    localFile.addEventListener('change', () => {
+      const file = localFile.files?.[0];
+      if (!file) return;
+      const url = URL.createObjectURL(file);
+      loadGame(url);
+    });
+
+    // Pantalla completa
+    fullBtn.addEventListener('click', () => {
+      if (playerEl && playerEl.requestFullscreen) {
+        playerEl.requestFullscreen();
+      } else if (stage.requestFullscreen) {
+        stage.requestFullscreen();
+      }
+    });
+
+    clearBtn.addEventListener('click', clearStage);
+    renderCards();
+  </script>
+</body>
+</html>
